@@ -3,7 +3,7 @@ matplotlib
 numpy
 pandas
 scikit_learn
-scipy==1.7.1
+scipy
 seaborn
 streamlit
 click
