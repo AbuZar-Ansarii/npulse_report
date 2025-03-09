@@ -10,7 +10,7 @@ click
 plotly
 boto3
 protobuf
-altair<5
+altair
 flask
 flask-limiter
 redis
