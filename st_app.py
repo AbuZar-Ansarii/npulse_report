@@ -1,4 +1,3 @@
-import os
 import json
 import logging
 import threading
@@ -92,6 +91,15 @@ def process_nadi(file_source, hand):
         result = process_nadi_data(file_path, hand)
         st.json(result)
 
+        # Add download button for the result
+        result_str = json.dumps(result, indent=4)
+        st.download_button(
+            label="Download Nadi Data Result",
+            data=result_str,
+            file_name="nadi_data_result.json",
+            mime="application/json"
+        )
+
     except Exception as e:
         logger.error(f"Error in process_nadi: {e}")
         st.error(f"Error: {e}")
@@ -124,6 +132,15 @@ def process_nadi_double(file_source1, file_source2, hand):
         # Process double Nadi data
         result = process_nadi_data_double(file_path1, file_path2, hand)
         st.json(result)
+
+        # Add download button for the result
+        result_str = json.dumps(result, indent=4)
+        st.download_button(
+            label="Download Double Nadi Data Result",
+            data=result_str,
+            file_name="double_nadi_data_result.json",
+            mime="application/json"
+        )
 
     except Exception as e:
         logger.error(f"Error in process_nadi_double: {e}")
@@ -179,6 +196,15 @@ def get_health_metrics(file_source):
             raise Exception(f"Error in SpO2 calculation: {e}")
 
         st.json(data)
+
+        # Add download button for the result
+        result_str = json.dumps(data, indent=4)
+        st.download_button(
+            label="Download Health Metrics Result",
+            data=result_str,
+            file_name="health_metrics_result.json",
+            mime="application/json"
+        )
 
     except Exception as e:
         logger.error(f"Error in get_health_metrics: {e}")
@@ -272,6 +298,15 @@ def generate_report(json_input_path):
 
         st.success(f"Report generated successfully: {pdf_filepath}")
 
+        # Add download button for the generated PDF
+        with open(pdf_filepath, "rb") as f:
+            st.download_button(
+                label="Download Comprehensive Nadi Report",
+                data=f,
+                file_name=pdf_filename,
+                mime="application/pdf"
+            )
+
     except Exception as e:
         logger.error(f"Error in generate_report: {e}")
         st.error(f"Error: {e}")
@@ -282,9 +317,10 @@ def generate_report(json_input_path):
 
 
 # Mode 5: Visualize Heart Rate Data
-def visualize_heart_rate_data(filename):
-    def load_data_from_file(filename):
-        data = []
+# Function to load data from a file
+def load_data_from_file(filename):
+    data = []
+    try:
         with open(filename, 'r') as file:
             for line in file:
                 line = line.strip()
@@ -298,45 +334,73 @@ def visualize_heart_rate_data(filename):
                         data.append(numbers)
                     except ValueError:
                         st.warning(f"Error converting line to numbers: {line}")
-        return data
+    except FileNotFoundError:
+        st.error(f"File not found: {filename}")
+    return data
 
-    def trim_data(data):
-        """Trim the data by taking only the latter half of the data points."""
-        n = len(data)
-        if n <= 1:
-            return data
-        return data[n // 2:]
+# Function to trim the data
+def trim_data(data):
+    """Trim the data by taking only the latter half of the data points."""
+    return data[len(data) // 2:] if len(data) > 1 else data
 
-    def visualize_data(data):
-        # Trim the data to only half of the points for a cleaner visualization
-        trimmed_data = trim_data(data)
-
-        # Unpack the trimmed data into three series
-        x = list(range(1, len(trimmed_data) + 1))
-        col1 = [row[0] for row in trimmed_data]
-        col2 = [row[1] for row in trimmed_data]
-        col3 = [row[2] for row in trimmed_data]
-
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(x, col1, label='Data Series 1', linewidth=1.5)
-        ax.plot(x, col2, label='Data Series 2', linewidth=1.5)
-        ax.plot(x, col3, label='Data Series 3', linewidth=1.5)
-
-        ax.set_title('Heart Rate Data Visualization')
-        ax.set_xlabel('Measurement Index')
-        ax.set_ylabel('Value')
-        ax.legend()
-        ax.grid(True)
-        plt.tight_layout()
-        st.pyplot(fig)
-
-    data = load_data_from_file(filename)
+# Function to visualize the heart rate data
+def visualize_data(data):
     if not data:
-        st.error("No valid data found. Please check the file and try again.")
+        st.error("No valid data to visualize.")
         return
 
-    visualize_data(data)
+    trimmed_data = trim_data(data)
 
+    x = list(range(1, len(trimmed_data) + 1))
+    col1 = [row[0] for row in trimmed_data]
+    col2 = [row[1] for row in trimmed_data]
+    col3 = [row[2] for row in trimmed_data]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(x, col1, label='Data Series 1', linewidth=1.5)
+    ax.plot(x, col2, label='Data Series 2', linewidth=1.5)
+    ax.plot(x, col3, label='Data Series 3', linewidth=1.5)
+
+    ax.set_title('Heart Rate Data Visualization')
+    ax.set_xlabel('Measurement Index')
+    ax.set_ylabel('Value')
+    ax.legend()
+    ax.grid(True)
+    plt.tight_layout()
+    st.pyplot(fig)
+
+# Function to visualize data from a file
+def visualize_heart_rate_data(filename):
+    data = load_data_from_file(filename)
+    if data:
+        visualize_data(data)
+
+# Function to visualize data from a URL
+def url_visualize_heart_rate_data(url):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        lines = response.text.splitlines()
+    except requests.RequestException as e:
+        st.error(f"Error fetching data: {e}")
+        return
+
+    data = []
+    for line in lines:
+        line = line.strip()
+        if line:
+            parts = line.split(',')
+            if len(parts) != 3:
+                st.warning(f"Skipping line (unexpected format): {line}")
+                continue
+            try:
+                numbers = list(map(float, parts))
+                data.append(numbers)
+            except ValueError:
+                st.warning(f"Error converting line to numbers: {line}")
+
+    if data:
+        visualize_data(data)
 
 def main():
     st.title("Nadi and Health Metrics Processing")
@@ -378,9 +442,12 @@ def main():
 
     elif mode == "Visualize Heart Rate Data":
         st.header("Visualize Heart Rate Data")
-        filename = st.text_input("Enter the .txt file name with pulse data")
+        filename = st.text_input("Enter the .txt file name or URL with pulse data")
         if st.button("Visualize"):
-            visualize_heart_rate_data(filename)
+            if filename.startswith('http'):
+                url_visualize_heart_rate_data(filename)
+            else:
+                visualize_heart_rate_data(filename)
 
 
 if __name__ == '__main__':
