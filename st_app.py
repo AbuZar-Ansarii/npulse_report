@@ -1,3 +1,4 @@
+
 import json
 import logging
 import os
@@ -7,10 +8,8 @@ import pandas as pd
 import requests
 import streamlit as st
 import matplotlib.pyplot as plt
-import io # Import io for in-memory file handling
 
-# Import your feature functions
-# Assuming these are in your project structure:
+# Import necessary functions
 from features.Nadi.functions_script import *
 from features.Nadi.signal_process import *
 from features.Nadi.nadi_processor_double import process_nadi_data_double
@@ -23,88 +22,108 @@ from nadi_report.report_generation import create_comprehensive_pdf
 
 # Setup logging
 logging.basicConfig(
-    level=logging.ERROR,
+    level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.FileHandler("app_terminal.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
+# Ensure tempFiles directory exists
+TEMP_DIR = "tempFiles"
+if not os.path.exists(TEMP_DIR):
+    os.makedirs(TEMP_DIR)
+    logger.info(f"Created directory: {TEMP_DIR}")
 
-# Allowed file extension for our text files
+# Allowed file extension
 def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() == "txt"
-
+    return filename.lower().endswith(".txt")
 
 # Download file if a URL is provided
-def download_file(url, dest_folder="tempFiles"):
-    if not os.path.exists(dest_folder):
-        os.makedirs(dest_folder)
-    response = requests.get(url)
-    if response.status_code != 200:
-        logger.error("Failed to download file from URL")
-        raise Exception("Failed to download file from URL")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    temp_path = os.path.join(dest_folder, f"temp_file_{timestamp}.txt")
-    with open(temp_path, "wb") as f:
-        f.write(response.content)
-    return temp_path
-
-
-def get_health_metrics(file_source):
+def download_file(url, dest_folder=TEMP_DIR):
     try:
-        if isinstance(file_source, str) and (
-            file_source.startswith("http://") or file_source.startswith("https://")
-        ):
+        response = requests.get(url)
+        if response.status_code != 200:
+            logger.error(f"Failed to download file: {url}")
+            raise Exception("Failed to download file from URL")
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path = os.path.join(dest_folder, f"temp_file_{timestamp}.txt")
+
+        with open(file_path, "wb") as f:
+            f.write(response.content)
+
+        logger.info(f"Downloaded file saved at: {file_path}")
+        return file_path
+    except Exception as e:
+        logger.error(f"Error in download_file: {e}")
+        raise Exception(f"Error downloading file: {e}")
+
+# Process health metrics from uploaded file
+def get_health_metrics(file_source):
+    temp_download = False
+    try:
+        if isinstance(file_source, str) and file_source.startswith(("http://", "https://")):
             file_path = download_file(file_source)
+            temp_download = True
         else:
-            # Handle uploaded file directly as bytes
-            file_path = io.BytesIO(file_source.getvalue())
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_path = os.path.join(TEMP_DIR, f"uploaded_file_{timestamp}.txt")
+
+            with open(file_path, "wb") as f:
+                file_source.seek(0)
+                f.write(file_source.read())
+
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"File not saved: {file_path}")
+
+        if not allowed_file(file_path):
+            raise ValueError("Invalid file type. Only '.txt' files are allowed.")
+
+        logger.info(f"Processing file: {file_path}")
 
         data = {}
-
         try:
             systolic_bp, diastolic_bp = predict_bp(file_path)
             data["systolic_bp"] = systolic_bp
             data["diastolic_bp"] = diastolic_bp
         except Exception as e:
             logger.error(f"Error in predict_bp: {e}")
-            raise Exception(f"Error in BP prediction: {e}")
+            data["systolic_bp"] = "N/A"
+            data["diastolic_bp"] = "N/A"
 
         try:
-            heart_rate = estimate_heart_rate(file_path)
-            data["heart_rate"] = heart_rate
+            data["heart_rate"] = estimate_heart_rate(file_path)
         except Exception as e:
             logger.error(f"Error in estimate_heart_rate: {e}")
-            raise Exception(f"Error in heart rate calculation: {e}")
+            data["heart_rate"] = "N/A"
 
         try:
-            temperature = calculate_temperature(file_path)
-            data["temperature"] = temperature
+            data["temperature"] = calculate_temperature(file_path)
         except Exception as e:
             logger.error(f"Error in calculate_temperature: {e}")
-            raise Exception(f"Error in temperature calculation: {e}")
+            data["temperature"] = "N/A"
 
         try:
-            spo2 = calculate_spo2(file_path)
-            data["spo2"] = spo2
+            data["spo2"] = calculate_spo2(file_path)
         except Exception as e:
             logger.error(f"Error in calculate_spo2: {e}")
-            raise Exception(f"Error in SpO2 calculation: {e}")
+            data["spo2"] = "N/A"
 
         return data
-
     except Exception as e:
         logger.error(f"Error in get_health_metrics: {e}")
         st.error(f"Error: {e}")
         return None
+    finally:
+        if temp_download and os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Deleted temporary file: {file_path}")
 
-
-
-# Function to load data from a file-like object
+# Load and process file data
 def load_data_from_file(file):
     data = []
-    file.seek(0)
     try:
+        file.seek(0)
         for line in file:
             line = line.decode("utf-8").strip()
             if line:
@@ -112,28 +131,25 @@ def load_data_from_file(file):
                 if len(parts) != 3:
                     continue
                 try:
-                    numbers = list(map(float, parts))
-                    data.append(numbers)
+                    data.append(list(map(float, parts)))
                 except ValueError:
-                    st.warning(f"Error converting line to numbers: {line}")
+                    logger.warning(f"Skipping invalid line: {line}")
     except Exception as e:
         st.error(f"Error reading file: {e}")
+        logger.error(f"Error reading file: {e}")
     return data
 
-
-# Function to trim the data
+# Trim data function
 def trim_data(data):
     return data[len(data) // 2 :] if len(data) > 1 else data
 
-
-# Function to visualize the heart rate data
+# Visualize heart rate data
 def visualize_data(data):
     if not data:
         st.error("No valid data to visualize.")
         return
 
     trimmed_data = trim_data(data)
-
     x = list(range(1, len(trimmed_data) + 1))
     col1 = [row[0] for row in trimmed_data]
     col2 = [row[1] for row in trimmed_data]
@@ -152,20 +168,23 @@ def visualize_data(data):
     plt.tight_layout()
     st.pyplot(fig)
 
-
 # Function to visualize data from a file
 def visualize_heart_rate_data(file):
     data = load_data_from_file(file)
     if data:
         visualize_data(data)
 
+# Streamlit App
 def main():
     st.title("N-PULSE DATA PROCESSING")
     st.sidebar.title("N-PULSE")
     uploaded_file = st.sidebar.file_uploader("Upload Data file", type="txt")
+
     if uploaded_file:
+        st.write(f"File uploaded: {uploaded_file.name}")
+
         if st.sidebar.button("Process"):
-            st.header("HEALTH METRICS")
+            st.title("HEALTH METRICS")
             try:
                 metrics = get_health_metrics(uploaded_file)
                 if metrics:
@@ -187,12 +206,13 @@ def main():
                         st.header("Systolic BP")
                         st.header(int(metrics.get("systolic_bp", "N/A")))
 
-                    st.header("DATA VISUALIZATION")
+                    st.title("DATA VISUALIZATION")
                     visualize_heart_rate_data(uploaded_file)
                 else:
                     st.error("Failed to retrieve health metrics.")
             except Exception as e:
-                st.error(f"An error occurred during processing: {e}")
+                st.error(f"An error occurred: {e}")
+                logger.error(f"Processing error: {e}")
 
 if __name__ == "__main__":
     main()
