@@ -7,6 +7,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import matplotlib.pyplot as plt
+import io # Import io for in-memory file handling
 
 # Import your feature functions
 # Assuming these are in your project structure:
@@ -50,22 +51,14 @@ def download_file(url, dest_folder="tempFiles"):
 
 
 def get_health_metrics(file_source):
-    temp_download = False
     try:
         if isinstance(file_source, str) and (
             file_source.startswith("http://") or file_source.startswith("https://")
         ):
             file_path = download_file(file_source)
-            temp_download = True
         else:
-            file_path = os.path.join(
-                "tempFiles", f"uploaded_file_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            )
-            with open(file_path, "wb") as f:
-                f.write(file_source.read())
-
-        if not allowed_file(file_path):
-            raise Exception("Invalid file type. Only '.txt' files are allowed.")
+            # Handle uploaded file directly as bytes
+            file_path = io.BytesIO(file_source.getvalue())
 
         data = {}
 
@@ -104,9 +97,7 @@ def get_health_metrics(file_source):
         logger.error(f"Error in get_health_metrics: {e}")
         st.error(f"Error: {e}")
         return None
-    finally:
-        if temp_download and os.path.exists(file_path):
-            os.remove(file_path)
+
 
 
 # Function to load data from a file-like object
@@ -119,7 +110,6 @@ def load_data_from_file(file):
             if line:
                 parts = line.split(",")
                 if len(parts) != 3:
-                    # st.warning(f"Skipping line (unexpected format): {line}")
                     continue
                 try:
                     numbers = list(map(float, parts))
@@ -168,7 +158,6 @@ def visualize_heart_rate_data(file):
     data = load_data_from_file(file)
     if data:
         visualize_data(data)
-
 
 def main():
     st.title("N-PULSE DATA PROCESSING")
